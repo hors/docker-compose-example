@@ -1,0 +1,80 @@
+version: "3"
+services:
+  pmm2-server:
+    image: "percona/pmm-server:2"
+    ports:
+     - "80:80"
+     - "443:443"
+    environment:
+     - SERVER_USER=admin
+     - SERVER_PASSWORD=admin
+
+  ps:
+    image: "percona/percona-server:latest"
+    environment:
+     - MYSQL_ROOT_PASSWORD=secret
+    ports:
+     - "3306:3306"
+
+  pmm-client-ps:
+    image: "percona/percona-xtradb-cluster-operator:1.2.0-pmm"
+    environment:
+     - PMM_SERVER=pmm2-server:443
+     - PMM_USER=admin
+     - PMM_PASSWORD=admin
+     - DB_TYPE=mysql
+     - DB_HOST=ps
+     - DB_PORT=3306
+     - DB_USER=root
+     - DB_PASSWORD=secret
+    depends_on:
+     - "ps"
+     - "pmm2-server"
+    ports:
+     - "7777:7777"
+    restart: on-failure:5
+
+  sysbench-ps:
+    image: "perconalab/sysbench"
+    depends_on:
+     - "ps"
+    command: >
+        bash -c "
+            set -o xtrace
+            sleep 20
+            mysql \
+                --host=ps \
+                --port=3306 \
+                --user=root \
+                --password=secret \
+                -e 'CREATE DATABASE IF NOT EXISTS sbtest'
+            sysbench \
+                --db-driver=mysql \
+                --mysql-host=ps \
+                --mysql-port=3306 \
+                --mysql-user=root \
+                --mysql-password=secret \
+                --mysql-db=sbtest \
+                --mysql-table-engine=innodb \
+                --oltp-table-size=1000000 \
+                /usr/share/sysbench/tests/include/oltp_legacy/oltp.lua \
+                prepare
+            sysbench \
+                --rate=200 \
+                --threads=64 \
+                --report-interval=10 \
+                --time=0 \
+                --events=0 \
+                --rand-type=pareto \
+                --db-driver=mysql \
+                --mysql-host=ps \
+                --mysql-port=3306 \
+                --mysql-user=root \
+                --mysql-password=secret \
+                --mysql-db=sbtest \
+                --mysql-table-engine=innodb \
+                --oltp-reconnect \
+                --oltp-table-size=1000000 \
+                /usr/share/sysbench/tests/include/oltp_legacy/select.lua \
+                run
+        "
